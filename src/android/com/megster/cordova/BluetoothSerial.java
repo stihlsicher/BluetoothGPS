@@ -24,6 +24,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Set;
+import java.util.ArrayList;
+
 
 /**
  * PhoneGap Plugin for Serial Communication over Bluetooth
@@ -83,6 +85,17 @@ public class BluetoothSerial extends CordovaPlugin {
     StringBuffer buffer = new StringBuffer();
     private String delimiter;
     private static final int REQUEST_ENABLE_BLUETOOTH = 1;
+
+
+    // GeoLocation Object
+    public GPSLocation gpsloc = new GPSLocation();
+
+
+    // Fehlermeldungen/Datenhaltung
+    private ArrayList<String> nmeaMessages = new ArrayList<String>();
+    private ArrayList<String> parsingErrors = new ArrayList<String>();
+    private ArrayList<String> parsedTypes = new ArrayList<String>();
+
 
     // Android 23 requires user to explicitly grant permission for location to discover unpaired
     private static final String ACCESS_COARSE_LOCATION = Manifest.permission.ACCESS_COARSE_LOCATION;
@@ -434,11 +447,91 @@ public class BluetoothSerial extends CordovaPlugin {
     }
 
     private void sendDataToSubscriber() {
-        String data = readUntil(delimiter);
-        if (data != null && data.length() > 0) {
-            PluginResult result = new PluginResult(PluginResult.Status.OK, data);
-            result.setKeepCallback(true);
-            dataAvailableCallback.sendPluginResult(result);
+        String message = readUntil(delimiter);
+        if (message != null && message.length() > 0) {
+
+            // Auswertung der NMEA-Daten
+            // Objekt füllen und bei neuem Strom abschicken
+
+            try {
+                /* Adding Sentences to Object */
+                 gpsloc.addSentence(message);
+                /* Parsing NMEA Data to Object */
+                if (gpsloc.getUTC(message)!=null) {
+                    if(!gpsloc.checkUTC(gpsloc.getUTC(message))) {
+                        /* Auswerten des Objektes und zurücksenden! */
+                        String loc = gpsloc.getLocation(parsingErrors, parsedTypes);
+                        if (loc != null) {
+
+
+                            PluginResult result = new PluginResult(PluginResult.Status.OK, loc);
+                            result.setKeepCallback(true);
+                            dataAvailableCallback.sendPluginResult(result);
+                        }
+                        gpsloc.clear();
+                    }
+                }
+                /* Gehört noch zur Serie */
+                String mt = null;
+                try {
+                    mt = gpsloc.messageType(message);
+                    //parsedTypes.add(mt);
+                } catch (Exception exc) {
+                    /*sendCallback(PluginResult.Status.ERROR,
+                            JSONHelper.errorJSON("NMEA", "Could not get Message type"
+                        + exc.getMessage() + "- "+message));*/
+                        //callbackContext.error("Could not parse meassge type");
+                }
+
+                try {
+                    if (mt != null && !mt.isEmpty()) {
+                        mt = mt.toUpperCase();
+                        //parsedTypes.add(mt);
+                        if (mt.equalsIgnoreCase("GST")) {
+                                gpsloc.parseGST(message);
+                                if (gpsloc.parseError()) {
+                                    parsingErrors.add(gpsloc.getError());
+                                }
+                        } else if (mt.equalsIgnoreCase("GGA")) {
+                                gpsloc.parseGGA(message);
+                                if (gpsloc.parseError()) {
+                                    parsingErrors.add(gpsloc.getError());
+                                }
+                        } else if (mt.equalsIgnoreCase("VTG")) {
+                                gpsloc.parseVTG(message);
+                                if (gpsloc.parseError()) {
+                                    parsingErrors.add(gpsloc.getError());
+                                }
+                        } else if (mt.equalsIgnoreCase("ZDA")) {
+                                gpsloc.parseZDA(message);
+                                if (gpsloc.parseError()) {
+                                    parsingErrors.add(gpsloc.getError());
+                                }
+                        } else if (mt.equalsIgnoreCase("GSA")) {
+                                gpsloc.parseGSA(message);
+                                if (gpsloc.parseError()) {
+                                    parsingErrors.add(gpsloc.getError());
+                                }
+                        }
+                    }
+                } catch (Exception exc) {
+                    /*sendCallback(PluginResult.Status.ERROR,
+                            JSONHelper.errorJSON("NMEA", "Could not parse"
+                        + exc.getMessage() + "- "+message));*/
+                        //callbackContext.error("Error parsing message: "+message+"\n "+exc.getMessage());
+                }
+
+
+            } catch (Exception exc) {
+                /*sendCallback(PluginResult.Status.ERROR,
+                        JSONHelper.errorJSON("NMEA", "Meine Ausgabe - vielleicht mehr info"
+                                + exc.getMessage()));*/
+                        //        callbackContext.error("error dealing with message: "+exc.getMessage());
+            }
+
+
+
+            
 
             sendDataToSubscriber();
         }
